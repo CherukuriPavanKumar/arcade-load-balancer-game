@@ -5,7 +5,7 @@ import { Canvas } from '@react-three/fiber'
 import { Line } from '@react-three/drei'
 const MessagePath = memo(Line);
 import { useRouter } from 'next/navigation'
-import { getVmAllStats, resetGame, setVm, startLoader, stopGame } from '@/app/actions'
+import { useGameEngine } from '@/hooks/useGameEngine'
 import UtilizationBox from '@/components/UtilizationBox'
 import EmptyVmBox from '@/components/EmptyVmBox'
 import LoadBalancerBox from '@/components/LoadBalancerBox'
@@ -57,49 +57,7 @@ const playerTwoBlocks = Array.from(Array(100).keys()).map((index) => {
   return { xPosition, yPosition, uuid }
 });
 
-type VmStatus = {
-  cpu: number,
-  memory: number,
-  score: number,
-  hostName: string,
-  queue: number,
-  tasksCompleted: number,
-  tasksRegistered: number,
-  utilization: number,
-  atMaxCapacity: boolean,
-};
 
-type VmStats = {
-  statusArray: VmStatus[],
-  playerName: string,
-  gameVmSelection: string,
-  gameVmSelectionIndex: number,
-  gameVmSelectionUpdates: number,
-  playerOneScore: number,
-  playerTwoScore: number,
-}
-
-const defaultVmStatuses: VmStatus[] = Array.from(Array(8).keys()).map(() => ({
-  cpu: 0,
-  memory: 11.5,
-  hostName: 'vm-default',
-  score: 0,
-  queue: 0,
-  tasksCompleted: 0,
-  tasksRegistered: 0,
-  utilization: 0,
-  atMaxCapacity: false
-}));
-
-const defaultVmStats = {
-  statusArray: defaultVmStatuses,
-  playerName: 'Default Player Name',
-  gameVmSelection: 'vm-default',
-  gameVmSelectionIndex: 0,
-  gameVmSelectionUpdates: 0,
-  playerOneScore: 0,
-  playerTwoScore: 0,
-};
 
 type ResultBlock = {
   uid: string,
@@ -116,14 +74,11 @@ export default function Play() {
   // TODO: Add pseudonyms for users
   const [playerOneEnd, setPlayerOneEnd] = useState<[number, number, number]>(playerEndPositions[0]);
   const [timeElapsed, setTimeElapsed] = useState(-5);
-  const [quarterSecondCounter, setQuarterSecondCounter] = useState(0);
-  const [playerName, setPlayerName] = useState('');
   const [failBlocks, setFailBlocks] = useState<FailResultBlock[]>([]);
   const [successBlocks, setSuccessBlocks] = useState<ResultBlock[]>([]);
-  const [vmStats, setVmStats] = useState<VmStats>(defaultVmStats)
   const [playerTwoTotal, setTotalPlayerTwoTotal] = useState(0);
-  const [gameStarted, setGameStarted] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  const engine = useGameEngine();
 
   // calculated values based on variables
   const playerOneMid: [number, number, number] = [playerOneEnd[0], playerMidYPosition, 0]
@@ -132,28 +87,27 @@ export default function Play() {
   const playerTwoEnd: [number, number, number] = [player2NextXPosition, vmYPositionBottom, 0];
   const playerTwoMid: [number, number, number] = [playerTwoEnd[0], playerMidYPosition, 0]
   const playerOneActiveVmIndex = player1VmXPositions.findIndex(value => playerOneEnd[0] === value);
-  const playerOneAtMaxCapacity = vmStats.statusArray[playerOneActiveVmIndex].atMaxCapacity;
+  const playerOneAtMaxCapacity = engine.vms[playerOneActiveVmIndex].atMaxCapacity;
   const playerOneActiveVmId = playerOneActiveVmIndex + 1
   const playerTwoActiveVmIndex = player2VmXPositions.findIndex(value => playerTwoEnd[0] === value);
-  const playerTwoAtMaxCapacity = vmStats.statusArray[playerTwoActiveVmIndex + 4].atMaxCapacity;
-  const playerOneScore = timeElapsed < 1 ? 0 : vmStats.playerOneScore;
-  const playerTwoScore = timeElapsed < 1 ? 0 : vmStats.playerTwoScore;
-  const timeRemaining = Math.min(totalGameTime - timeElapsed, totalGameTime);
+  const playerTwoAtMaxCapacity = engine.vms[playerTwoActiveVmIndex + 4].atMaxCapacity;
+  const playerOneScore = timeElapsed < 1 ? 0 : engine.playerOneScore;
+  const playerTwoScore = timeElapsed < 1 ? 0 : engine.playerTwoScore;
+  const timeRemaining = Math.max(0, Math.min(totalGameTime - timeElapsed, totalGameTime));
 
   useEffect(() => {
-    setVm({ vmId: playerOneActiveVmId }, localStorage.getItem("secretPassword") || '');
-
+    engine.selectVm(playerOneActiveVmId);
   }, [playerOneActiveVmId])
 
   useEffect(() => {
     // add success block to any vm that has more than 0% in the queue
     const newSuccessXPosition = [];
     // add player one success block
-    if (vmStats.statusArray[player2NextVmIndex].queue > 0) {
+    if (engine.vms[player2NextVmIndex].queue > 0) {
       newSuccessXPosition.push(player1VmXPositions[player2NextVmIndex])
     }
     // add player two success block
-    if (vmStats.statusArray[player2NextVmIndex + 4].queue > 0) {
+    if (engine.vms[player2NextVmIndex + 4].queue > 0) {
       newSuccessXPosition.push(player2VmXPositions[player2NextVmIndex])
     }
     const newSuccessBlocks = newSuccessXPosition.map(xPosition => {
@@ -162,41 +116,15 @@ export default function Play() {
       return { uid, startingPosition }
     })
     // limit to 100 blocks to prevent the screen from freezing up
-    setSuccessBlocks([...newSuccessBlocks, ...successBlocks].slice(0, 200));
+    setSuccessBlocks(prev => [...newSuccessBlocks, ...prev].slice(0, 200));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player2NextVmIndex]);
+  }, [player2NextVmIndex, engine.vms]);
 
   useEffect(() => {
-    const getStartLoader = async () => {
-      try {
-        const { player_name } = await startLoader(localStorage.getItem("secretPassword") || '');
-        console.log({ player_name })
-        setPlayerName(player_name);
-      } catch (error) {
-        console.error('Failed to start')
-      }
+    if (!engine.isRunning && timeElapsed > -2 && timeElapsed < totalGameTime) {
+      engine.startGame();
     }
-    if (!gameStarted && timeElapsed > -2) {
-      setGameStarted(true);
-      getStartLoader();
-    }
-  }, [gameStarted, timeElapsed]);
-
-  useEffect(() => {
-    const getVMStatus = async () => {
-      if (timeElapsed < totalGameTime + 5) {
-        var startTime = performance.now()
-        const vmStats = await getVmAllStats(localStorage.getItem("secretPassword") || '');
-        var endTime = performance.now()
-        console.log({ vmStats });
-        setVmStats(vmStats);
-        const duration = Math.floor(endTime - startTime);
-        console.log(`Call to vmStatuses took ${duration} milliseconds`)
-      }
-    }
-    getVMStatus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quarterSecondCounter]);
+  }, [timeElapsed, engine]);
 
   const handleKeyDown = (event: KeyboardEvent) => {
     switch (event.code) {
@@ -212,9 +140,7 @@ export default function Play() {
   };
 
   useEffect(() => {
-    resetGame(localStorage.getItem("secretPassword") || '');
     window.addEventListener("keydown", handleKeyDown);
-
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
@@ -229,18 +155,8 @@ export default function Play() {
   }, [timeElapsed]);
 
   useEffect(() => {
-    //Implementing the setInterval method
-    const fastInterval = setInterval(() => {
-      setQuarterSecondCounter(quarterSecondCounter + 1);
-    }, 250);
-
-    //Clearing the interval
-    return () => clearInterval(fastInterval);
-  }, [quarterSecondCounter]);
-
-  useEffect(() => {
     if (timeElapsed >= totalGameTime && !showResults) {
-      stopGame(localStorage.getItem("secretPassword") || '');
+      engine.stopGame();
       setShowResults(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,7 +191,7 @@ export default function Play() {
         <div className='flex flex-row items-center transition-all duration-1000 justify-between px-6 rounded-l-full shadow-lg' style={{ height: '100px', width: `${Math.max(playerOneScore, 20)}%`, minWidth: '300px', backgroundColor: colors.player1 }}>
           <div className='flex flex-col'>
             <span className="text-sm font-bold text-black/60 uppercase tracking-widest">Player</span>
-            <h2 className={`text-2xl font-black text-black`}>{playerName}</h2>
+            <h2 className={`text-2xl font-black text-black`}>GDG Player</h2>
           </div>
           <h3 className='text-6xl font-black text-black drop-shadow-sm'>
             {playerOneScore}
@@ -358,7 +274,7 @@ export default function Play() {
         />
         {/* Player VMs */}
         {player1VmXPositions.map((vmXPosition, index) => {
-          const { atMaxCapacity } = vmStats.statusArray[index];
+          const { atMaxCapacity } = engine.vms[index];
           return <EmptyVmBox
             key={vmXPosition}
             vmXPosition={vmXPosition}
@@ -372,12 +288,12 @@ export default function Play() {
           <UtilizationBox
             position={[vmXPosition, vmYPosition - 0.45, 0.1]}
             key={vmXPosition}
-            utilization={vmStats.statusArray[index].utilization}
+            utilization={engine.vms[index].utilization}
           />
         ))}
         {/* Global Load Balancer VMs */}
         {player2VmXPositions.map((vmXPosition, index) => {
-          const { atMaxCapacity } = vmStats.statusArray[index + 4];
+          const { atMaxCapacity } = engine.vms[index + 4];
           return <EmptyVmBox
             key={vmXPosition}
             vmXPosition={vmXPosition}
@@ -391,7 +307,7 @@ export default function Play() {
           <UtilizationBox
             position={[vmXPosition, vmYPosition - 0.45, 0.1]}
             key={vmXPosition}
-            utilization={vmStats.statusArray[index + 4].utilization}
+            utilization={engine.vms[index + 4].utilization}
           />
         ))}
       </Canvas>
