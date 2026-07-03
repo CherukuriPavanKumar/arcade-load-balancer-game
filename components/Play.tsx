@@ -127,8 +127,8 @@ export default function Play() {
   const [gameStarted, setGameStarted] = useState(false);
   const [showResults, setShowResults] = useState(false);
   
-  // WOW API States
   const [qrSessionId, setQrSessionId] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
   // calculated values based on variables
@@ -152,8 +152,9 @@ export default function Play() {
       try {
         const sid = await createExperienceSession("arcade_load_balancer", "Load Balancing Blitz", 0);
         if (active) setQrSessionId(sid);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to create WOW API session", err);
+        if (active) setQrError(err.message || "Failed to create session");
       }
     };
     initQr();
@@ -312,8 +313,12 @@ export default function Play() {
       </div>
 
       {/* QR Payment Overlay */}
-      {qrSessionId && !paymentSuccess && (
-        <QrPaymentOverlay sessionId={qrSessionId} />
+      {!paymentSuccess && (
+        <QrPaymentOverlay 
+          sessionId={qrSessionId} 
+          error={qrError} 
+          onSkip={() => setPaymentSuccess(true)} 
+        />
       )}
       <div className='flex w-full justify-center gap-4 p-6 z-20'>
         <div className='flex flex-row items-center transition-all duration-1000 justify-between px-6 rounded-l-full shadow-lg' style={{ height: '100px', width: `${Math.max(playerOneScore, 20)}%`, minWidth: '300px', backgroundColor: colors.player1 }}>
