@@ -13,6 +13,8 @@ import MessageIncoming from '@/components/MessageIncoming'
 import MessageFailure from '@/components/MessageFailure'
 import MessageSuccess from '@/components/MessageSuccess'
 import Results from '@/components/Results';
+import QrPaymentOverlay from './QrPaymentOverlay';
+import { createExperienceSession, pollSessionStatus, completeExperience } from '@/lib/wowApi';
 
 const totalGameTime = 60;
 const player1VmXPositions = [-5.0, -3.5, -2.0, -0.6];
@@ -124,6 +126,10 @@ export default function Play() {
   const [playerTwoTotal, setTotalPlayerTwoTotal] = useState(0);
   const [gameStarted, setGameStarted] = useState(false);
   const [showResults, setShowResults] = useState(false);
+  
+  // WOW API States
+  const [qrSessionId, setQrSessionId] = useState<string | null>(null);
+  const [paymentSuccess, setPaymentSuccess] = useState(false);
 
   // calculated values based on variables
   const playerOneMid: [number, number, number] = [playerOneEnd[0], playerMidYPosition, 0]
@@ -141,9 +147,37 @@ export default function Play() {
   const timeRemaining = Math.min(totalGameTime - timeElapsed, totalGameTime);
 
   useEffect(() => {
-    setVm({ vmId: playerOneActiveVmId }, localStorage.getItem("secretPassword") || '');
+    let active = true;
+    const initQr = async () => {
+      try {
+        const sid = await createExperienceSession("arcade_load_balancer", "Load Balancing Blitz", 0);
+        if (active) setQrSessionId(sid);
+      } catch (err) {
+        console.error("Failed to create WOW API session", err);
+      }
+    };
+    initQr();
+    return () => { active = false; };
+  }, []);
 
-  }, [playerOneActiveVmId])
+  useEffect(() => {
+    if (!qrSessionId || paymentSuccess) return;
+    const interval = setInterval(async () => {
+      try {
+        const session = await pollSessionStatus(qrSessionId);
+        if (session.session_status === 'SUCCESS') {
+          setPaymentSuccess(true);
+        }
+      } catch (err) {
+        // Suppress polling errors
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [qrSessionId, paymentSuccess]);
+
+  useEffect(() => {
+    setVm({ vmId: playerOneActiveVmId }, localStorage.getItem("secretPassword") || '');
+  }, [playerOneActiveVmId]);
 
   useEffect(() => {
     // add success block to any vm that has more than 0% in the queue
@@ -176,11 +210,11 @@ export default function Play() {
         console.error('Failed to start')
       }
     }
-    if (!gameStarted && timeElapsed > -2) {
+    if (!gameStarted && timeElapsed > -2 && paymentSuccess) {
       setGameStarted(true);
       getStartLoader();
     }
-  }, [gameStarted, timeElapsed]);
+  }, [gameStarted, timeElapsed, paymentSuccess]);
 
   useEffect(() => {
     const getVMStatus = async () => {
@@ -194,9 +228,9 @@ export default function Play() {
         console.log(`Call to vmStatuses took ${duration} milliseconds`)
       }
     }
-    getVMStatus();
+    if (paymentSuccess) getVMStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quarterSecondCounter]);
+  }, [quarterSecondCounter, paymentSuccess]);
 
   const handleKeyDown = (event: KeyboardEvent) => {
     switch (event.code) {
@@ -219,6 +253,7 @@ export default function Play() {
   }, []);
 
   useEffect(() => {
+    if (!paymentSuccess) return;
     //Implementing the setInterval method
     const interval = setInterval(() => {
       setTimeElapsed(timeElapsed + 1);
@@ -226,9 +261,10 @@ export default function Play() {
 
     //Clearing the interval
     return () => clearInterval(interval);
-  }, [timeElapsed]);
+  }, [timeElapsed, paymentSuccess]);
 
   useEffect(() => {
+    if (!paymentSuccess) return;
     //Implementing the setInterval method
     const fastInterval = setInterval(() => {
       setQuarterSecondCounter(quarterSecondCounter + 1);
@@ -236,15 +272,18 @@ export default function Play() {
 
     //Clearing the interval
     return () => clearInterval(fastInterval);
-  }, [quarterSecondCounter]);
+  }, [quarterSecondCounter, paymentSuccess]);
 
   useEffect(() => {
     if (timeElapsed >= totalGameTime && !showResults) {
       stopGame(localStorage.getItem("secretPassword") || '');
+      if (qrSessionId) {
+        completeExperience(qrSessionId, playerOneScore).catch(console.error);
+      }
       setShowResults(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [timeElapsed]);
+  }, [timeElapsed, qrSessionId, playerOneScore]);
 
   const addFailBlock = (failBlockStartingPosition: [number, number, number]) => {
     const [x, y, z] = failBlockStartingPosition;
@@ -271,6 +310,11 @@ export default function Play() {
           {timeRemaining}
         </span>
       </div>
+
+      {/* QR Payment Overlay */}
+      {qrSessionId && !paymentSuccess && (
+        <QrPaymentOverlay sessionId={qrSessionId} />
+      )}
       <div className='flex w-full justify-center gap-4 p-6 z-20'>
         <div className='flex flex-row items-center transition-all duration-1000 justify-between px-6 rounded-l-full shadow-lg' style={{ height: '100px', width: `${Math.max(playerOneScore, 20)}%`, minWidth: '300px', backgroundColor: colors.player1 }}>
           <div className='flex flex-col'>
