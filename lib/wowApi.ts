@@ -25,7 +25,12 @@ export async function createExperienceSession(experience_id: string, name: strin
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to create session: ${response.statusText}`);
+    let errorMessage = response.statusText;
+    try {
+      const errorData = await response.json();
+      if (errorData.message) errorMessage = errorData.message;
+    } catch (e) {}
+    throw new Error(`Failed to create session: ${errorMessage}`);
   }
 
   const data = await response.json();
