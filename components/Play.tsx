@@ -150,7 +150,7 @@ export default function Play() {
     let active = true;
     const initQr = async () => {
       try {
-        const sid = await createExperienceSession("arcade_load_balancer", "Load Balancing Blitz", 0);
+        const sid = await createExperienceSession("arcade_load_balancer", "Load Balancing Blitz", 10);
         if (active) setQrSessionId(sid);
       } catch (err: any) {
         console.error("Failed to create WOW API session", err);
