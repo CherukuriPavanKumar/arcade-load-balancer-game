@@ -445,7 +445,7 @@ export default function Play() {
         ))}
       </Canvas>
       {/* Start Game Countdown */}
-      <div className={`flex items-center justify-center transition-all fixed inset-0 bg-black/80 backdrop-blur-sm duration-1000 ${timeElapsed < -1 ? 'opacity-100' : 'opacity-0'}  ${timeElapsed < 0 ? 'z-50' : '-z-50'}`}>
+      <div className={`flex items-center justify-center transition-all fixed inset-0 bg-black/80 backdrop-blur-sm duration-1000 ${timeElapsed < -1 && paymentSuccess ? 'opacity-100' : 'opacity-0'}  ${timeElapsed < 0 && paymentSuccess ? 'z-50' : '-z-50'}`}>
         <div className="flex flex-col items-center">
           <span className="text-2xl font-bold text-[#4285F4] uppercase tracking-widest mb-4">Get Ready</span>
           <span className="text-[12rem] font-black text-white">{Math.abs(timeElapsed)}</span>
